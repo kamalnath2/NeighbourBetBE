@@ -7,6 +7,7 @@ const rateLimit = require('express-rate-limit');
 const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
+const { connectRedis } = require('./utils/redisClient');
 require('dotenv').config();
 
 // Import routes
@@ -145,20 +146,25 @@ app.use('*', (req, res) => {
 });
 
 // Database connection
-mongoose.connect(process.env.MONGODB_URI)
-  .then(() => {
+const startServer = async () => {
+  try {
+    // Connect to MongoDB
+    await mongoose.connect(process.env.MONGODB_URI);
     console.log('Connected to MongoDB');
-    
-    // Start server
+
+    // Connect to Redis
+    await connectRedis();
+
+    // Start Express server
     const PORT = process.env.PORT || 3000;
-    server.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
-    });
-  })
-  .catch((error) => {
+    server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+  } catch (error) {
     console.error('MongoDB connection error:', error);
     process.exit(1);
-  });
+  }
+};
+
+startServer();
 
 // Graceful shutdown
 process.on('SIGTERM', () => {

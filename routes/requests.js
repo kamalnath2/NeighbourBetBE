@@ -3,24 +3,22 @@ const { body, validationResult } = require('express-validator');
 const Request = require('../models/Request');
 const User = require('../models/User');
 const Chat = require('../models/Chat');
+const ProximityService = require('../services/proximityService');
+const NotificationService = require('../utils/notificationService');
 
 const router = express.Router();
 
 // Helper function to broadcast new request to nearby users
-async function broadcastNewRequestToNearbyUsers(request, io) {
+async function broadcastNewRequestToNearbyUsers(request, nearbyUsers, io) {
   try {
-    // Find users within the request radius
-    const nearbyUsers = await User.findNearby(
-      request.location.coordinates,
-      request.radius
-    ).select('_id');
-
     if (!nearbyUsers.length) {
       console.log('No nearby users found for broadcasting');
       return;
     }
 
-    // Get the request data to send
+    // Populate requester info for the payload
+    await request.populate('requester', 'name age gender profileImage');
+
     const requestData = {
       id: request._id,
       title: request.title,
@@ -111,12 +109,19 @@ router.post('/', [
       $inc: { 'stats.requestsSent': 1 }
     });
 
-    // Broadcast new request to nearby users via socket
-    broadcastNewRequestToNearbyUsers(request, req.app.get('io'));
+    // --- ADVANCED PROXIMITY SEARCH ---
+    // 1. Find nearby users using the advanced Redis-based proximity service
+    const nearbyUsers = await ProximityService.findNearbyUsers(
+      coordinates[1], // latitude
+      coordinates[0], // longitude
+      radius
+    );
 
-    // Send push notifications to nearby users
-    const NotificationService = require('../utils/notificationService');
-    NotificationService.notifyNearbyUsersOfNewRequest(request, request.requester);
+    // 2. Broadcast to sockets using the list of nearby users
+    broadcastNewRequestToNearbyUsers(request, nearbyUsers, req.app.get('io'));
+
+    // 3. Send push notifications using the SAME list of nearby users
+    NotificationService.notifyNearbyUsersOfNewRequest(request, req.user, nearbyUsers);
 
     res.status(201).json({
       status: 'success',

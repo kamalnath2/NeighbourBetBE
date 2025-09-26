@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const User = require('../models/User');
 const Request = require('../models/Request');
+const ProximityService = require('../services/proximityService');
 
 const router = express.Router();
 
@@ -111,6 +112,9 @@ router.put('/location', [
       },
       { new: true, runValidators: true }
     );
+
+    // Update location in the Redis grid for fast proximity searches
+    await ProximityService.updateUserLocation(req.user.id, coordinates[1], coordinates[0]);
 
     res.status(200).json({
       status: 'success',

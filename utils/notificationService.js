@@ -112,16 +112,8 @@ class NotificationService {
   }
 
   // Send new request notification to nearby users
-  async notifyNearbyUsersOfNewRequest(request, requester) {
+  async notifyNearbyUsersOfNewRequest(request, requester, nearbyUsers) {
     try {
-      const User = require('../models/User');
-
-      // Find users within the request radius
-      const nearbyUsers = await User.findNearby(
-        request.location.coordinates,
-        request.radius
-      ).select('deviceTokens settings');
-
       if (!nearbyUsers.length) {
         console.log('No nearby users found for notification');
         return;
