@@ -15,6 +15,7 @@ const userRoutes = require('./routes/users');
 const requestRoutes = require('./routes/requests');
 const chatRoutes = require('./routes/chat');
 const locationRoutes = require('./routes/location');
+const uploadRoutes = require('./routes/upload');
 
 // Import middleware
 const { protect } = require('./middleware/auth');
@@ -26,15 +27,18 @@ const server = http.createServer(app);
 // Socket.io setup
 const io = socketIo(server, {
   cors: {
-    origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:8081'],
+    origin: true, // Allow all origins for development
     methods: ['GET', 'POST']
   }
 });
 
+// Make io accessible to our router
+app.set('io', io);
+
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
+  max: 500 // limit each IP to 500 requests per windowMs for development
 });
 
 // Middleware
@@ -42,7 +46,7 @@ app.use(helmet());
 app.use(morgan('combined'));
 app.use(limiter);
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:8081'],
+  origin: true, // Allow all origins for development
   credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));
@@ -57,6 +61,7 @@ app.use('/api/users', protect, userRoutes);
 app.use('/api/requests', protect, requestRoutes);
 app.use('/api/chat', protect, chatRoutes);
 app.use('/api/location', protect, locationRoutes);
+app.use('/api/upload', protect, uploadRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -97,10 +102,24 @@ io.on('connection', (socket) => {
     });
   });
 
+  // Handle joining/leaving request-specific rooms for location tracking
+  socket.on('joinRequestRoom', (data) => {
+    const { requestId } = data;
+    socket.join(`request-${requestId}`);
+    console.log(`User ${socket.id} joined room request-${requestId}`);
+  });
+
+  socket.on('leaveRequestRoom', (data) => {
+    const { requestId } = data;
+    socket.leave(`request-${requestId}`);
+    console.log(`User ${socket.id} left room request-${requestId}`);
+  });
+
   // Handle location updates
-  socket.on('updateLocation', (data) => {
-    const { userId, location } = data;
-    socket.to(userId).emit('locationUpdate', { userId, location });
+  socket.on('updateLocation', async (data) => {
+    const { requestId, userId, location } = data;
+    // Broadcast to the specific request room, excluding the sender
+    socket.to(`request-${requestId}`).emit('locationUpdate', { userId, location });
   });
 
   // Handle request status updates

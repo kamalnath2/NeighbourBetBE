@@ -6,6 +6,52 @@ const Chat = require('../models/Chat');
 
 const router = express.Router();
 
+// Helper function to broadcast new request to nearby users
+async function broadcastNewRequestToNearbyUsers(request, io) {
+  try {
+    // Find users within the request radius
+    const nearbyUsers = await User.findNearby(
+      request.location.coordinates,
+      request.radius
+    ).select('_id');
+
+    if (!nearbyUsers.length) {
+      console.log('No nearby users found for broadcasting');
+      return;
+    }
+
+    // Get the request data to send
+    const requestData = {
+      id: request._id,
+      title: request.title,
+      description: request.description,
+      type: request.type,
+      location: request.location,
+      radius: request.radius,
+      maxAcceptors: request.maxAcceptors,
+      createdAt: request.createdAt,
+      requester: {
+        _id: request.requester._id,
+        name: request.requester.name,
+        age: request.requester.age,
+        gender: request.requester.gender,
+        profileImage: request.requester.profileImage,
+      },
+      acceptedCount: request.acceptedCount,
+      timeAgo: request.timeAgo,
+    };
+
+    // Broadcast to each nearby user's socket room
+    nearbyUsers.forEach(user => {
+      io.to(user._id.toString()).emit('newNearbyRequest', requestData);
+    });
+
+    console.log(`Broadcasted new request to ${nearbyUsers.length} nearby users`);
+  } catch (error) {
+    console.error('Error broadcasting new request:', error);
+  }
+}
+
 // @desc    Create a new request
 // @route   POST /api/requests
 // @access  Private
@@ -16,7 +62,8 @@ router.post('/', [
   body('coordinates').isArray({ min: 2, max: 2 }).withMessage('Coordinates must be an array of [longitude, latitude]'),
   body('address').trim().isLength({ min: 1, max: 255 }).withMessage('Address is required and must be less than 255 characters'),
   body('radius').optional().isInt({ min: 1, max: 50 }).withMessage('Radius must be between 1 and 50 km'),
-  body('maxAcceptors').optional().isInt({ min: 1, max: 10 }).withMessage('Max acceptors must be between 1 and 10')
+  body('maxAcceptors').optional().isInt({ min: 1, max: 10 }).withMessage('Max acceptors must be between 1 and 10'),
+  body('attachments').optional().isArray().withMessage('Attachments must be an array of strings'),
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -63,6 +110,13 @@ router.post('/', [
     await User.findByIdAndUpdate(req.user.id, {
       $inc: { 'stats.requestsSent': 1 }
     });
+
+    // Broadcast new request to nearby users via socket
+    broadcastNewRequestToNearbyUsers(request, req.app.get('io'));
+
+    // Send push notifications to nearby users
+    const NotificationService = require('../utils/notificationService');
+    NotificationService.notifyNearbyUsersOfNewRequest(request, request.requester);
 
     res.status(201).json({
       status: 'success',
@@ -319,6 +373,18 @@ router.post('/:id/accept', [
     await request.populate('requester', 'name age gender profileImage');
     await request.populate('acceptedBy.user', 'name profileImage');
 
+    // Send push notification to requester
+    const NotificationService = require('../utils/notificationService');
+    const acceptor = await User.findById(req.user.id).select('name');
+    NotificationService.notifyRequestAccepted(request, acceptor);
+
+    // Broadcast status update via socket
+    req.app.get('io').emit('requestStatusUpdate', {
+      requestId: request._id,
+      status: request.status,
+      acceptedCount: request.acceptedBy.length
+    });
+
     res.status(200).json({
       status: 'success',
       message: 'Request accepted successfully',
@@ -420,6 +486,18 @@ router.put('/:id/status', [
     }
 
     await request.save();
+
+    // Send push notifications to acceptors about status change
+    const NotificationService = require('../utils/notificationService');
+    const changer = await User.findById(req.user.id).select('name');
+    NotificationService.notifyRequestStatusChange(request, status, changer);
+
+    // Broadcast status update via socket
+    req.app.get('io').emit('requestStatusUpdate', {
+      requestId: request._id,
+      status: status,
+      acceptedCount: request.acceptedBy.length
+    });
 
     res.status(200).json({
       status: 'success',

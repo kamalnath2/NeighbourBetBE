@@ -52,7 +52,7 @@ const userSchema = new mongoose.Schema({
     },
     coordinates: {
       type: [Number], // [longitude, latitude]
-      required: false
+      default: [0, 0] // Default to [0, 0] coordinates if not provided
     },
     address: {
       type: String,
@@ -103,6 +103,21 @@ const userSchema = new mongoose.Schema({
       max: 50
     }
   },
+  deviceTokens: [{
+    token: {
+      type: String,
+      required: true
+    },
+    platform: {
+      type: String,
+      enum: ['ios', 'android'],
+      required: true
+    },
+    lastUsed: {
+      type: Date,
+      default: Date.now
+    }
+  }],
   stats: {
     requestsSent: {
       type: Number,
@@ -126,14 +141,7 @@ const userSchema = new mongoose.Schema({
       type: Number,
       default: 0 // in minutes
     }
-  },
-  deviceTokens: [{
-    token: String,
-    platform: {
-      type: String,
-      enum: ['ios', 'android']
-    }
-  }]
+  }
 }, {
   timestamps: true,
   toJSON: { virtuals: true },

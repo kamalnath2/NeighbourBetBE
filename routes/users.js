@@ -295,4 +295,93 @@ router.delete('/account', async (req, res) => {
   }
 });
 
+// @desc    Register device token for push notifications
+// @route   POST /api/users/device-token
+// @access  Private
+router.post('/device-token', [
+  body('token').trim().isLength({ min: 100 }).withMessage('Device token is required'),
+  body('platform').isIn(['ios', 'android']).withMessage('Platform must be ios or android')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const { token, platform } = req.body;
+
+    // Remove this token from other users (in case user logged in on different device)
+    await User.updateMany(
+      { 'deviceTokens.token': token },
+      { $pull: { deviceTokens: { token } } }
+    );
+
+    // Add token to current user
+    const user = await User.findByIdAndUpdate(
+      req.user.id,
+      {
+        $push: {
+          deviceTokens: {
+            token,
+            platform,
+            lastUsed: new Date()
+          }
+        }
+      },
+      { new: true }
+    );
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Device token registered successfully'
+    });
+  } catch (error) {
+    console.error('Register device token error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Server error'
+    });
+  }
+});
+
+// @desc    Remove device token
+// @route   DELETE /api/users/device-token
+// @access  Private
+router.delete('/device-token', [
+  body('token').trim().isLength({ min: 100 }).withMessage('Device token is required')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const { token } = req.body;
+
+    await User.findByIdAndUpdate(
+      req.user.id,
+      { $pull: { deviceTokens: { token } } }
+    );
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Device token removed successfully'
+    });
+  } catch (error) {
+    console.error('Remove device token error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Server error'
+    });
+  }
+});
+
 module.exports = router;

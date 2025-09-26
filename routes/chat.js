@@ -65,10 +65,20 @@ router.get('/', async (req, res) => {
 // @access  Private
 router.get('/:id', async (req, res) => {
   try {
+    const { page = 1, limit = 20 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
     const chat = await Chat.findById(req.params.id)
       .populate('participants', 'name profileImage lastSeen')
-      .populate('request', 'title type status')
-      .populate('messages.sender', 'name profileImage');
+      .populate({
+        path: 'request',
+        select: 'title type status acceptedBy',
+      })
+      .populate({
+        path: 'messages.sender',
+        select: 'name profileImage'
+      })
+      .select({ messages: { $slice: [ -skip - parseInt(limit), parseInt(limit) ] } });
 
     if (!chat) {
       return res.status(404).json({
@@ -187,23 +197,29 @@ router.post('/:id/messages', [
     const updatedChat = await Chat.findById(req.params.id)
       .populate('messages.sender', 'name profileImage');
 
+    const io = req.app.get('io');
     const newMessage = updatedChat.messages[updatedChat.messages.length - 1];
+
+    updatedChat.participants.forEach(participantId => {
+      req.app.get('io').to(participantId.toString()).emit('messageReceived', {
+        chatId: updatedChat._id,
+        id: newMessage._id,
+        text: newMessage.content.text,
+        type: newMessage.content.type,
+        fileUrl: newMessage.content.fileUrl,
+        location: newMessage.content.location,
+        timestamp: newMessage.timestamp,
+        isFromUser: participantId.toString() === newMessage.sender._id.toString(),
+        sender: {
+          id: newMessage.sender._id,
+          name: newMessage.sender.name,
+        },
+      }); 
+    });
 
     res.status(201).json({
       status: 'success',
       message: 'Message sent successfully',
-      data: {
-        message: {
-          id: newMessage._id,
-          text: newMessage.content.text,
-          type: newMessage.content.type,
-          fileUrl: newMessage.content.fileUrl,
-          location: newMessage.content.location,
-          timestamp: newMessage.timestamp,
-          isFromUser: true,
-          sender: newMessage.sender
-        }
-      }
     });
   } catch (error) {
     console.error('Send message error:', error);
@@ -213,6 +229,7 @@ router.post('/:id/messages', [
     });
   }
 });
+
 
 // @desc    Mark messages as read
 // @route   PUT /api/chat/:id/read

@@ -2,6 +2,7 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const User = require('../models/User');
+const { protect } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -19,7 +20,7 @@ router.post('/register', [
   body('name').trim().isLength({ min: 2, max: 50 }).withMessage('Name must be between 2 and 50 characters'),
   body('email').isEmail().normalizeEmail().withMessage('Please provide a valid email'),
   body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
-  body('phone').isMobilePhone().withMessage('Please provide a valid phone number'),
+  body('phone').isLength({ min: 10, max: 15 }).withMessage('Phone number must be between 10 and 15 digits'),
   body('age').isInt({ min: 13, max: 120 }).withMessage('Age must be between 13 and 120'),
   body('gender').isIn(['male', 'female', 'other']).withMessage('Gender must be male, female, or other')
 ], async (req, res) => {
@@ -44,14 +45,19 @@ router.post('/register', [
       });
     }
 
-    // Create user
+    // Create user with default location
     const user = await User.create({
       name,
       email,
       password,
       phone,
       age,
-      gender
+      gender,
+      location: {
+        type: 'Point',
+        coordinates: [0, 0], // Default coordinates
+        address: ''
+      }
     });
 
     // Generate token
@@ -153,10 +159,24 @@ router.post('/login', [
 // @desc    Get current user
 // @route   GET /api/auth/me
 // @access  Private
-router.get('/me', async (req, res) => {
+router.get('/me', protect, async (req, res) => {
   try {
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Not authorized to access this route'
+      });
+    }
+
     const user = await User.findById(req.user.id);
     
+    if (!user) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'User not found'
+      });
+    }
+
     res.status(200).json({
       status: 'success',
       data: {
